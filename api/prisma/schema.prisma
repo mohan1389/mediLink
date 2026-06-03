@@ -1,0 +1,319 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+}
+
+enum UserRole {
+  PATIENT
+  DOCTOR
+  HOSPITAL
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  UNKNOWN
+}
+
+enum UploadCategory {
+  REPORT
+  SCAN_IMAGING
+  PRESCRIPTION
+  OTHER
+}
+
+enum StorageProvider {
+  LOCAL
+  CLOUDINARY
+}
+
+enum FamilyLinkStatus {
+  PENDING
+  ACCEPTED
+}
+
+enum EmergencyContactKind {
+  USER
+  EMAIL
+}
+
+enum DoseSlot {
+  MORNING
+  AFTERNOON
+  EVENING
+  NIGHT
+  BEDTIME
+}
+
+model User {
+  id        String    @id // Clerk userId (prototype trusts this)
+  role      UserRole  @default(PATIENT)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  patientProfile PatientProfile?
+  doctorProfile  DoctorProfile?
+
+  uploads          FileUpload[]
+  shareRequestsOut ShareRequest[] @relation("ShareRequestsAsPatient")
+  shareRequestsIn  ShareRequest[] @relation("ShareRequestsAsDoctor")
+
+  shareRequestsSubject ShareRequest[] @relation("ShareRequestsAsSubject")
+
+  familyLinksOwned  FamilyLink[] @relation("FamilyLinkOwner")
+  familyLinksMember FamilyLink[] @relation("FamilyLinkMember")
+
+  prescriptionsAuthored Prescription[] @relation("PrescriptionsAsDoctor")
+  prescriptionsOwned   Prescription[] @relation("PrescriptionsAsPatient")
+
+  emergencyContactsOwned EmergencyContact[] @relation("EmergencyContactsAsOwner")
+  emergencyContactsAsContact EmergencyContact[] @relation("EmergencyContactsAsContact")
+
+  medicines    PatientMedicine[]
+  vitalRecords VitalRecord[]
+}
+
+model FamilyLink {
+  id       String           @id @default(cuid())
+  ownerId  String
+  memberId String
+  status   FamilyLinkStatus @default(PENDING)
+
+  // When true, notify the owner on emergency events for the member.
+  emergencyNotify Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner  User @relation("FamilyLinkOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  member User @relation("FamilyLinkMember", fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([ownerId, memberId])
+  @@index([memberId, status])
+  @@index([ownerId, status])
+}
+
+model PatientProfile {
+  userId          String  @id
+  user            User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  fullName        String
+  email           String?
+  phone           String?
+  dob             DateTime?
+  age             Int?
+  gender          Gender  @default(UNKNOWN)
+  uniquePatientId String  @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model EmergencyContact {
+  id        String @id @default(cuid())
+
+  patientId String
+  patient   User   @relation("EmergencyContactsAsOwner", fields: [patientId], references: [id], onDelete: Cascade)
+
+  kind          EmergencyContactKind
+  contactUserId String?
+  contactUser   User?  @relation("EmergencyContactsAsContact", fields: [contactUserId], references: [id], onDelete: Cascade)
+
+  email String?
+  label String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([patientId, contactUserId])
+  @@unique([patientId, email])
+  @@index([patientId])
+}
+
+model DoctorProfile {
+  userId        String @id
+  user          User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  fullName      String
+  specialty     String
+  licenseNumber String?
+  email         String?
+  phone         String?
+  gender        Gender  @default(UNKNOWN)
+  dob           DateTime?
+  avatarUrl     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model FileUpload {
+  id           String         @id @default(cuid())
+  patientId    String
+  patient      User           @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  category     UploadCategory @default(OTHER)
+  originalName String
+  mimeType     String
+  sizeBytes    Int
+  storagePath  String
+  storageProvider     StorageProvider @default(LOCAL)
+  storagePublicId     String?
+  storageResourceType String?
+
+  createdAt DateTime @default(now())
+
+  shareRequestFiles ShareRequestFile[]
+}
+
+model ShareRequest {
+  id        String   @id @default(cuid())
+  patientId String
+  doctorId  String
+  subjectPatientId String?
+  message   String?
+
+  createdAt DateTime @default(now())
+
+  patient User @relation("ShareRequestsAsPatient", fields: [patientId], references: [id], onDelete: Cascade)
+  doctor  User @relation("ShareRequestsAsDoctor", fields: [doctorId], references: [id], onDelete: Cascade)
+
+  subjectPatient User? @relation("ShareRequestsAsSubject", fields: [subjectPatientId], references: [id], onDelete: SetNull)
+
+  files         ShareRequestFile[]
+  prescriptions Prescription[]
+
+  @@index([doctorId, createdAt])
+  @@index([patientId, createdAt])
+  @@index([subjectPatientId, createdAt])
+}
+
+model ShareRequestFile {
+  shareRequestId String
+  fileUploadId   String
+
+  shareRequest ShareRequest @relation(fields: [shareRequestId], references: [id], onDelete: Cascade)
+  fileUpload   FileUpload   @relation(fields: [fileUploadId], references: [id], onDelete: Cascade)
+
+  @@id([shareRequestId, fileUploadId])
+}
+
+model Prescription {
+  id            String  @id @default(cuid())
+  patientId     String
+  doctorId      String
+  shareRequestId String?
+  notes         String?
+
+  createdAt DateTime @default(now())
+
+  patient User @relation("PrescriptionsAsPatient", fields: [patientId], references: [id], onDelete: Cascade)
+  doctor  User @relation("PrescriptionsAsDoctor", fields: [doctorId], references: [id], onDelete: Cascade)
+  shareRequest ShareRequest? @relation(fields: [shareRequestId], references: [id], onDelete: SetNull)
+
+  items PrescriptionItem[]
+
+  @@index([patientId, createdAt])
+  @@index([doctorId, createdAt])
+}
+
+model PrescriptionItem {
+  id             String @id @default(cuid())
+  prescriptionId String
+  prescription   Prescription @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
+
+  medicineName String
+  dosage       String    // legacy free-text kept for backward compat
+  frequency    String?   // legacy free-text kept for backward compat
+  duration     String?   // legacy free-text kept for backward compat
+
+  // Structured fields (new)
+  dosageAmount  Float?   // e.g. 500
+  dosageUnit    String?  // e.g. "mg", "ml", "mcg", "units", "tablets"
+  durationDays  Int?     // e.g. 7
+  slots         String?  // JSON array of DoseSlot: ["MORNING","NIGHT"]
+
+  medicines PatientMedicine[]
+}
+
+model PatientMedicine {
+  id String @id @default(cuid())
+
+  patientId String
+  patient   User   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  prescriptionItemId String?
+  prescriptionItem   PrescriptionItem? @relation(fields: [prescriptionItemId], references: [id], onDelete: SetNull)
+
+  medicineName  String
+  dosageText    String
+  frequencyText String?
+  durationText  String?
+
+  // JSON array of DoseSlot strings (SQLite doesn't support enum lists).
+  slotsJson Json
+
+  unitsPerDose   Int @default(1)
+  inventoryCount Int @default(0)
+
+  active           Boolean  @default(true)
+  lastReconciledAt DateTime @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  doseLogs MedicineDoseLog[]
+
+  @@index([patientId, active])
+  @@index([prescriptionItemId])
+}
+
+model MedicineDoseLog {
+  id String @id @default(cuid())
+
+  medicineId String
+  medicine   PatientMedicine @relation(fields: [medicineId], references: [id], onDelete: Cascade)
+
+  scheduledAt   DateTime
+  consumedUnits Int
+
+  createdAt DateTime @default(now())
+
+  @@unique([medicineId, scheduledAt])
+  @@index([medicineId, scheduledAt])
+}
+
+model VitalRecord {
+  id        String @id @default(cuid())
+  patientId String
+  patient   User   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  recordedAt DateTime @default(now())
+
+  // Blood pressure (mmHg)
+  bpSystolic  Int?
+  bpDiastolic Int?
+
+  // Blood sugar (mg/dL)
+  bloodSugarFasting  Float?
+  bloodSugarPostMeal Float?
+
+  // Other vitals
+  heartRate   Int?    // bpm
+  weight      Float?  // kg
+  temperature Float?  // Celsius
+  oxygenSat   Int?    // SpO2 %
+
+  notes String?
+
+  createdAt DateTime @default(now())
+
+  @@index([patientId, recordedAt])
+}
